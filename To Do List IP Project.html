@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI&DS To-Do List Manager</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Chart.js for Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <!-- Load Inter font -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            /* UPDATED: Subtle Radial Gradient Background - now hints at Cyan */
+            background-color: #eef3f8; /* Fallback color */
+            background-image: radial-gradient(at 80% 0%, #ffffff 0%, #e0f7fa 100%); /* Light Blue/Cyan tint */
+        }
+        /* Custom priority badge colors */
+        .badge-high { background-color: #fee2e2; color: #dc2626; border: 1px solid #f87171; } /* Red-100/600 */
+        .badge-medium { background-color: #fef3c7; color: #d97706; border: 1px solid #facc15; } /* Yellow-100/600 */
+        .badge-low { background-color: #d1fae5; color: #059669; border: 1px solid #34d399; } /* Green-100/600 */       
+        .completed-task {
+            background-color: #e2e8f0; /* Slate-200 */
+            text-decoration: line-through;
+            opacity: 0.6;
+            transition: all 0.3s ease;
+        }
+        /* Custom feedback box for AI Prioritization */
+        #ai-feedback {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+        /* Collapsible content transition */
+        .collapsible-content {
+            transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+            max-height: 2000px; /* Large enough to cover max content */
+            opacity: 1;
+        }
+        .collapsible-content.collapsed {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+        }
+        /* NEW: CSS for Task Entry/Exit Animation */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .task-enter {
+            animation: fadeIn 0.3s ease-out;
+        }
+        /* Class added to tasks before removal */
+        .task-exit {
+            transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 sm:p-6 lg:p-8">
+    <!-- Global Application Container -->
+    <div id="app-container" class="w-full max-w-5xl bg-white shadow-2xl rounded-xl overflow-hidden">
+        <!-- Header -->
+        <header class="bg-cyan-600 text-white p-4 sm:p-6 flex justify-between items-center">
+            <h1 class="text-xl sm:text-2xl font-extrabold flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                Task Manager
+            </h1>
+            <div class="flex items-center space-x-2">
+                <span id="username-display" class="font-medium text-sm sm:text-base">Guest</span>
+                <button id="auth-button" class="bg-cyan-700 hover:bg-cyan-800 text-white font-semibold py-1 px-3 rounded-full text-sm transition duration-200 shadow-lg">Login/Register</button>
+            </div>
+        </header>
+        <!-- Main Content Area (Hidden until login/register is complete) -->
+        <div id="main-content" class="p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-3 gap-6" style="display: none;">
+            <!-- Column 1: Task Management -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Task Creation Form -->
+                <div class="bg-white p-4 border border-gray-200 rounded-xl shadow-xl">
+                    <h2 class="text-xl font-bold mb-4 text-gray-800">Add/Edit Task</h2>
+                    <form id="task-form" class="space-y-4">
+                        <input type="hidden" id="task-id">
+                        <input type="text" id="task-title" placeholder="Task Title (e.g., Implement backend API)" required class="w-full p-3 border-2 border-gray-200 rounded-lg focus:ring-cyan-500 focus:border-cyan-500 transition duration-150">
+                        <textarea id="task-description" placeholder="Description (Optional)" rows="2" class="w-full p-3 border-2 border-gray-200 rounded-lg focus:ring-cyan-500 focus:border-cyan-500 transition duration-150"></textarea>                      
+                        <!-- Priority, Due Date, Time Estimate, and AI Prioritization -->
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                            <div class="sm:col-span-1">
+                                <label for="task-priority" class="block text-xs font-medium text-gray-700 mb-1">Priority</label>
+                                <select id="task-priority" required class="w-full p-3 border-2 border-gray-200 rounded-lg focus:ring-cyan-500 focus:border-cyan-500 text-gray-700">
+                                    <option value="" disabled selected>Select Priority</option>
+                                    <option value="High">🚨 High Priority</option>
+                                    <option value="Medium">🟠 Medium Priority</option>
+                                    <option value="Low">🟢 Low Priority</option>
+                                </select>
+                            </div>
+                            <div class="sm:col-span-1">
+                                <label for="task-due-date" class="block text-xs font-medium text-gray-700 mb-1">Due Date</label>
+                                <input type="date" id="task-due-date" required class="w-full p-3 border-2 border-gray-200 rounded-lg focus:ring-cyan-500 focus:border-cyan-500 text-gray-700">
+                            </div>
+                            <div class="sm:col-span-1">
+                                <label for="task-time-estimate" class="block text-xs font-medium text-gray-700 mb-1">Time Estimate</label>
+                                <input type="text" id="task-time-estimate" placeholder="e.g., 2h, 30m" class="w-full p-3 border-2 border-gray-200 rounded-lg focus:ring-cyan-500 focus:border-cyan-500 text-gray-700">
+                            </div>
+                            <div class="sm:col-span-1">
+                                <!-- AI Prioritize Button -->
+                                <button type="button" onclick="autoPrioritizeTask()" 
+                                        class="w-full h-full min-h-[48px] bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-3 rounded-lg text-sm transition duration-200 shadow-md transform hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center space-x-1">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6 1.1l-.879.879M18 10h1m-1.1-6.9l-.879-.879m-12 5.8a9 9 0 11-3.619 4.39A9 9 0 0110 3.619M12 15a3 3 0 100-6 3 3 0 000 6z" /></svg>
+                                    <span>AI Prioritize</span>
+                                </button>
+                            </div>
+                        </div>                       
+                        <button type="submit" id="submit-button" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-lg transition duration-200 shadow-lg transform hover:scale-[1.01] active:scale-[0.99]">Add Task</button>
+                    </form>
+                </div>
+                <!-- Filtering & Sorting Controls -->
+                <div class="flex flex-wrap items-center justify-between gap-3 p-4 bg-gray-100 rounded-xl shadow-inner border border-gray-200">
+                    <div class="flex gap-4">
+                        <div class="w-full sm:w-auto">
+                            <label for="filter-status" class="block text-xs font-medium text-gray-600 mb-1">Filter Status</label>
+                            <select id="filter-status" class="w-full p-2 border border-gray-300 rounded-lg text-sm text-gray-700">
+                                <option value="All">All Tasks</option>
+                                <option value="Pending">Pending</option>
+                                <option value="Completed">Completed</option>
+                            </select>
+                        </div>
+                        <div class="w-full sm:w-auto">
+                            <label for="sort-by" class="block text-xs font-medium text-gray-600 mb-1">Sort By</label>
+                            <select id="sort-by" class="w-full p-2 border border-gray-300 rounded-lg text-sm text-gray-700">
+                                <option value="grouping">Grouping (Default)</option>
+                                <option value="priority">Priority</option>
+                                <option value="dueDate">Due Date</option>
+                                <option value="createdDate">Created Date</option>
+                            </select>
+                        </div>
+                    </div>                    
+                    <button onclick="clearCompletedTasks()" id="clear-completed-button" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-200 shadow-md transform hover:scale-105">
+                        Clear Completed (0)
+                    </button>
+                </div>
+                <!-- Task List (Now contains grouped sections) -->
+                <div class="space-y-6" id="task-list">
+                    <p class="text-center text-gray-500 p-8 bg-white rounded-xl shadow-lg">Loading tasks from API...</p>
+                </div>
+            </div>
+            <!-- Column 2: Progress Tracking & Analytics -->
+            <div class="lg:col-span-1 space-y-6">
+                <div class="bg-white p-4 border border-gray-200 rounded-xl shadow-xl">
+                    <h2 class="text-xl font-bold mb-4 text-gray-800">Progress Tracker</h2>
+                    <!-- Summary Stats -->
+                    <div class="grid grid-cols-3 gap-2 text-center mb-4">
+                        <div class="bg-cyan-50 p-3 rounded-lg">
+                            <p id="total-tasks" class="text-2xl font-extrabold text-cyan-700">0</p>
+                            <p class="text-xs text-gray-500">Total</p>
+                        </div>
+                        <div class="bg-green-50 p-3 rounded-lg">
+                            <p id="completed-tasks" class="text-2xl font-extrabold text-green-700">0</p>
+                            <p class="text-xs text-gray-500">Completed</p>
+                        </div>
+                        <div class="bg-purple-50 p-3 rounded-lg">
+                            <p id="completion-rate" class="text-2xl font-extrabold text-purple-700">0%</p>
+                            <p class="text-xs text-gray-500">Rate</p>
+                        </div>
+                    </div>
+                    <!-- Chart.js Canvas -->
+                    <div class="h-56">
+                        <canvas id="task-progress-chart"></canvas>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-3 text-center">Weekly Task Progress (Chart.js)</p>
+                </div>
+                <!-- Overdue Tasks (Simulated Reminders) -->
+                <div id="overdue-alert" class="bg-red-100 border-2 border-red-500 p-4 rounded-xl shadow-xl hidden animate-pulse">
+                    <h3 class="text-lg font-bold text-red-700 mb-2 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
+                        Overdue Tasks!
+                    </h3>
+                    <ul id="overdue-list" class="list-disc list-inside text-sm text-red-600 space-y-1">
+                        <!-- Overdue tasks will be injected here -->
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>   
+    <!-- Custom AI Feedback Box (NEW) -->
+    <div id="ai-feedback" class="bg-purple-100 border-l-4 border-purple-500 text-purple-800 p-4 rounded-lg shadow-xl hidden transition-opacity duration-300">
+        <p id="ai-feedback-message" class="font-medium"></p>
+    </div>
+    <!-- Modal for Login/Register (Authentication is mocked, but structure is ready) -->
+    <div id="auth-modal" class="fixed inset-0 bg-gray-900 bg-opacity-80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-white rounded-xl shadow-3xl w-full max-w-sm relative overflow-hidden">            
+            <!-- Header for Modal -->
+            <div class="bg-cyan-600 text-white p-6 text-center">
+                <h2 class="text-3xl font-extrabold flex items-center justify-center space-x-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/></svg>
+                    <span>Task Access</span>
+                </h2>
+                <p class="text-xs mt-1 opacity-80">Login or Register to manage your tasks.</p>
+            </div>
+            <div class="p-6">
+                <!-- Status Message -->
+                <div id="auth-message" class="text-sm text-red-500 mb-4 text-center hidden p-2 bg-red-50 rounded-lg"></div>               
+                <!-- START EDIT: Update login-form to use flex layout for buttons -->
+                <form id="login-form" class="space-y-4">
+                    <input type="text" id="auth-username" placeholder="Username" required class="w-full p-3 border-2 border-gray-300 rounded-lg focus:ring-cyan-500 focus:border-cyan-500 transition duration-150">
+                    <input type="password" id="auth-password" placeholder="Password" required class="w-full p-3 border-2 border-gray-300 rounded-lg focus:ring-cyan-500 focus:border-cyan-500 transition duration-150">
+                    
+                    <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3 pt-2">
+                        <button type="submit" class="w-full sm:w-1/2 bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-lg transition duration-200 shadow-lg transform hover:scale-[1.01] active:scale-[0.99]">
+                            Login
+                        </button>
+                        <button type="button" id="register-button" class="w-full sm:w-1/2 bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg transition duration-200 shadow-md transform hover:scale-[1.01] active:scale-[0.99]">
+                            Register
+                        </button>
+                    </div>
+                </form>
+                <!-- END EDIT -->
+            </div>           
+            <!-- Close Button -->
+            <button id="close-auth-modal" class="absolute top-2 right-4 text-white hover:text-cyan-100 text-3xl font-light">&times;</button>
+        </div>
+    </div>
+    <!-- Custom Confirmation Modal for Deletion -->
+    <div id="confirmation-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-xs text-center relative">
+            <h3 class="text-xl font-bold text-red-600 mb-3">Confirm Deletion</h3>
+            <p id="confirm-message" class="text-gray-600 mb-6">Are you sure you want to delete this task?</p>
+            <div class="flex justify-around space-x-4">
+                <button id="confirm-delete-button" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg flex-1 transition duration-200">Delete</button>
+                <button id="cancel-delete-button" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg flex-1 transition duration-200">Cancel</button>
+            </div>
+        </div>
+    </div>
+<script>
+    // --- FIREBASE PLACEHOLDERS (These variables are now vestigial but kept for compliance) ---
+    const __app_id = 'default-todo-app';
+    const __firebase_config = '{}';
+    const __initial_auth_token = undefined;
+    // ----------------------------------------------------------------------
+
+    // --- 1. NEW: API Configuration ---
+    const API_URL = 'http://localhost:3000/api/tasks'; // Must match your server.js port and route prefix
+
+    const appState = {
+        // userId and username are MOCKED for this combined demo, as the backend is stateless
+        userId: 'mock-user-123', 
+        username: 'API_User',
+        tasks: [], // This will hold tasks fetched from the API
+        currentSort: 'grouping',
+        currentFilter: 'All',
+        taskIdToDelete: null
+    };
+
+    // DOM Elements
+    const appContainer = document.getElementById('app-container');
+    const mainContent = document.getElementById('main-content');
+    const usernameDisplay = document.getElementById('username-display');
+    const authButton = document.getElementById('auth-button');
+    const authModal = document.getElementById('auth-modal');
+    const closeAuthModal = document.getElementById('close-auth-modal');
+    const authMessage = document.getElementById('auth-message');
+    const loginForm = document.getElementById('login-form');
+    const registerButton = document.getElementById('register-button');
+    const taskIdInput = document.getElementById('task-id');
+    const taskForm = document.getElementById('task-form');
+    const taskList = document.getElementById('task-list');
+    const filterStatus = document.getElementById('filter-status');
+    const sortBy = document.getElementById('sort-by');
+    const submitButton = document.getElementById('submit-button');
+    const totalTasksEl = document.getElementById('total-tasks');
+    const completedTasksEl = document.getElementById('completed-tasks');
+    const completionRateEl = document.getElementById('completion-rate');
+    const overdueAlert = document.getElementById('overdue-alert');
+    const overdueList = document.getElementById('overdue-list');
+    const clearCompletedButton = document.getElementById('clear-completed-button');
+    const aiFeedback = document.getElementById('ai-feedback');
+    const aiFeedbackMessage = document.getElementById('ai-feedback-message');
+    // New Modal Elements
+    const confirmationModal = document.getElementById('confirmation-modal');
+    const confirmDeleteButton = document.getElementById('confirm-delete-button');
+    const cancelDeleteButton = document.getElementById('cancel-delete-button');
+    let progressChart;
+
+
+    // --- API FETCH UTILITY FUNCTION ---
+    async function apiFetch(endpoint = '', method = 'GET', data = null) {
+        const url = API_URL + endpoint;
+        const options = {
+            method: method,
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        };
+        if (data) {
+            options.body = JSON.stringify(data);
+        }
+        
+        const maxRetries = 3;
+        let delay = 1000;
+        
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                const response = await fetch(url, options);
+
+                if (response.status === 204) {
+                    return null;
+                }
+
+                if (!response.ok) {
+                    const errorBody = await response.text();
+                    throw new Error(`API Error ${response.status}: ${errorBody}`);
+                }
+
+                return await response.json();
+
+            } catch (error) {
+                console.error(`API Fetch failed (Attempt ${i + 1}):`, error.message);
+                if (i < maxRetries - 1) {
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; 
+                } else {
+                    throw new Error('Failed to connect to the backend API after multiple retries. Check console for details.');
+                }
+            }
+        }
+    }
+
+    // --- ASYNC TASK FETCHING (REPLACES mockDb.loadTasks) ---
+    async function fetchTasks() {
+        // --- ADDED CONSOLE LOG FOR DEBUGGING ---
+        console.log(`[DEBUG] Attempting to fetch tasks from: ${API_URL}`);
+        try {
+            taskList.innerHTML = '<p class="text-center text-gray-500 p-8 bg-white rounded-xl shadow-lg">Loading tasks from API...</p>';
+            const tasks = await apiFetch('', 'GET');
+            // Ensure tasks is an array, even if the API sends null or empty for safety
+            appState.tasks = Array.isArray(tasks) ? tasks : [];
+            renderTaskList();
+        } catch (error) {
+            console.error('Failed to load tasks:', error);
+            taskList.innerHTML = `<p class="text-center text-red-600 p-8 bg-white rounded-xl shadow-lg">Error loading tasks: ${error.message}. Is your Node.js server running?</p>`;
+        }
+    }
+
+
+    // Utility Functions
+    const mockDb = {
+        users: JSON.parse(localStorage.getItem('mockUsers')) || {},
+        saveUsers() {
+            localStorage.setItem('mockUsers', JSON.stringify(this.users));
+        }
+    };
+
+    function generateId() {
+        return 'temp-id-' + Math.random().toString(36).substring(2, 9);
+    }
+    function formatDate(dateString) {
+        if (!dateString) return 'No Due Date';
+        const options = { year: 'numeric', month: 'short', day: 'numeric' };
+        return new Date(dateString + 'T00:00:00').toLocaleDateString(undefined, options);
+    }
+    function formatGoogleDate(dateString) {
+        if (!dateString) return '';
+        const date = new Date(dateString + 'T00:00:00'); 
+        
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');       
+        
+        const nextDay = new Date(date);
+        nextDay.setDate(date.getDate() + 1);
+        const nextYear = nextDay.getFullYear();
+        const nextMonth = String(nextDay.getMonth() + 1).padStart(2, '0');
+        const nextDayOfMonth = String(nextDay.getDate()).padStart(2, '0');
+
+        return `${year}${month}${day}/${nextYear}${nextMonth}${nextDayOfMonth}`;
+    }
+    function getGoogleCalendarUrl(task) {
+        if (!task.dueDate) return null;
+        const details = `Priority: ${task.priority}%0AEstimation: ${task.estimatedTime || 'N/A'}%0A%0A${task.description || 'No description provided.'}`;
+        const dates = formatGoogleDate(task.dueDate);      
+        const url = new URL('https://calendar.google.com/calendar/render');
+        url.searchParams.set('action', 'TEMPLATE');
+        url.searchParams.set('text', task.title);
+        url.searchParams.set('details', details);
+        url.searchParams.set('dates', dates); 
+        
+        return url.toString();
+    }
+    function getPriorityBadgeClass(priority) {
+        switch (priority) {
+            case 'High': return 'badge-high';
+            case 'Medium': return 'badge-medium';
+            case 'Low': return 'badge-low';
+            default: return 'bg-gray-200 text-gray-700';
+        }
+    }    
+    // Custom Modal Functions
+    function showConfirmationModal(taskId) {
+        appState.taskIdToDelete = taskId;
+        confirmationModal.classList.remove('hidden');
+    }
+    function hideConfirmationModal() {
+        appState.taskIdToDelete = null;
+        confirmationModal.classList.add('hidden');
+    }
+    confirmDeleteButton.addEventListener('click', () => {
+        if (appState.taskIdToDelete && appState.taskIdToDelete !== 'CLEAR_COMPLETED') {
+            finalDeleteTask(appState.taskIdToDelete);
+            hideConfirmationModal();
+        }
+    });
+    cancelDeleteButton.addEventListener('click', hideConfirmationModal);    
+    closeAuthModal.addEventListener('click', () => {
+        authModal.classList.add('hidden');
+    });
+    window.toggleGroup = function(groupId) {
+        const content = document.getElementById('group-content-' + groupId);
+        const icon = document.getElementById('group-icon-' + groupId);
+        
+        if (content.classList.contains('collapsed')) {
+            content.classList.remove('collapsed');
+            icon.classList.remove('rotate-0');
+            icon.classList.add('rotate-90');
+        } else {
+            content.classList.add('collapsed');
+            icon.classList.remove('rotate-90');
+            icon.classList.add('rotate-0');
+        }
+    }
+
+    // --- Authentication Logic (MOCK) ---
+    function showAuthMessage(message, isError = false) {
+        authMessage.textContent = message;
+        authMessage.classList.remove('text-red-500', 'text-green-500', 'bg-red-50', 'bg-green-50');
+        authMessage.classList.add(isError ? 'text-red-500 bg-red-50' : 'text-green-500 bg-green-50');
+        authMessage.classList.remove('hidden');
+    }
+    function attemptLogin(username, password) {
+        if (mockDb.users[username] && mockDb.users[username].password === password) {
+            appState.userId = mockDb.users[username].id;
+            appState.username = username;
+            renderApp(true);
+            showAuthMessage(`Welcome back, ${username}!`, false);
+            setTimeout(() => authModal.classList.add('hidden'), 1000);
+            return true;
+        }
+        showAuthMessage('Invalid username or password.', true);
+        return false;
+    }
+    function attemptRegister(username, password) {
+        if (mockDb.users[username]) {
+            showAuthMessage('Username already exists.', true);
+            return false;
+        }
+        const newId = generateId(); 
+        mockDb.users[username] = { id: newId, password: password };
+        mockDb.saveUsers();
+        appState.userId = newId;
+        appState.username = username;
+        appState.tasks = [];
+        renderApp(true);
+        showAuthMessage(`Registration successful! Welcome, ${username}.`, false);
+        setTimeout(() => authModal.classList.add('hidden'), 1000);
+        return true;
+    }
+    function handleLogout() {
+        appState.userId = null;
+        appState.username = 'Guest';
+        appState.tasks = [];
+        renderApp();
+    }
+    loginForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const username = document.getElementById('auth-username').value;
+        const password = document.getElementById('auth-password').value;
+        attemptLogin(username, password);
+    });
+    registerButton.addEventListener('click', () => {
+        const username = document.getElementById('auth-username').value;
+        const password = document.getElementById('auth-password').value;
+        if (username && password) {
+            attemptRegister(username, password);
+        } else {
+            showAuthMessage('Please enter a username and password to register.', true);
+        }
+    });
+    authButton.addEventListener('click', () => {
+        if (appState.userId) {
+            handleLogout();
+        } else {
+            authModal.classList.remove('hidden');
+            authMessage.classList.add('hidden');
+            loginForm.reset();
+        }
+    });
+
+    // --- AI Priority Helper Functions (Unchanged) ---
+    function parseTimeEstimate(timeStr) {
+        if (!timeStr) return 0;
+        const matchH = timeStr.match(/(\d+)\s*h/i);
+        const matchM = timeStr.match(/(\d+)\s*m/i);
+        let totalMinutes = 0;
+        if (matchH) {
+            totalMinutes += parseInt(matchH[1]) * 60;
+        }
+        if (matchM) {
+            totalMinutes += parseInt(matchM[1]);
+        }
+        return totalMinutes;
+    }   
+    function showAIFeedback(message, isError = false) {
+        aiFeedbackMessage.textContent = message;
+        aiFeedback.classList.remove('hidden', 'bg-purple-100', 'border-purple-500', 'text-purple-800', 'bg-red-100', 'border-red-500', 'text-red-800');
+        if (isError) {
+            aiFeedback.classList.add('bg-red-100', 'border-red-500', 'text-red-800');
+        } else {
+            aiFeedback.classList.add('bg-purple-100', 'border-purple-500', 'text-purple-800');
+        }
+        aiFeedback.style.opacity = '1';       
+        setTimeout(() => {
+            aiFeedback.style.opacity = '0';
+            setTimeout(() => aiFeedback.classList.add('hidden'), 300);
+        }, 3000);
+    }
+    function autoPrioritizeTask() {
+        const title = document.getElementById('task-title').value.trim().toLowerCase();
+        const dueDateStr = document.getElementById('task-due-date').value;
+        const timeEstimateStr = document.getElementById('task-time-estimate').value.trim();
+        if (!title || !dueDateStr) {
+            showAIFeedback('Please enter a Task Title and Due Date before prioritizing.', true);
+            return;
+        }
+        let score = 0;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const dueDate = new Date(dueDateStr);
+        const diffTime = dueDate.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));       
+        if (diffDays < 0) {
+            score += 4;
+        } else if (diffDays <= 1) {
+            score += 3;
+        } else if (diffDays <= 3) {
+            score += 2;
+        } else if (diffDays <= 7) {
+            score += 1;
+        }
+        const highPriorityKeywords = ['fix', 'urgent', 'client', 'bug', 'critical', 'deploy', 'meeting'];
+        const lowPriorityKeywords = ['research', 'plan', 'learn', 'explore', 'optional', 'docs'];
+        const titleWords = title.split(/\s+/);
+        titleWords.forEach(word => {
+            if (highPriorityKeywords.includes(word)) {
+                score += 1;
+            }
+            if (lowPriorityKeywords.includes(word)) {
+                score -= 1;
+            }
+        });
+        const estimatedMinutes = parseTimeEstimate(timeEstimateStr);
+        const longTaskThreshold = 180;
+        const shortTaskThreshold = 30;
+        if (estimatedMinutes > longTaskThreshold) {
+            score -= 1;
+        } else if (estimatedMinutes > 0 && estimatedMinutes <= shortTaskThreshold && diffDays > 1) {
+            score += 1;
+        }
+        let newPriority = 'Low';
+        if (score >= 4) {
+            newPriority = 'High';
+        } else if (score >= 1) {
+            newPriority = 'Medium';
+        }        
+        document.getElementById('task-priority').value = newPriority;
+        showAIFeedback(`AI suggested priority: ${newPriority} (Score: ${score}).`);
+    }
+
+    // --- TASK MANAGEMENT FUNCTIONS (UPDATED WITH API CALLS) ---
+    async function handleTaskSubmit(e) {
+        e.preventDefault();
+        if (!appState.userId) {
+            showAuthMessage('Please log in to manage tasks.', true);
+            authModal.classList.remove('hidden');
+            return;
+        }
+
+        submitButton.disabled = true;
+        submitButton.textContent = taskIdInput.value ? 'Saving...' : 'Adding...';
+
+        const title = document.getElementById('task-title').value.trim();
+        const description = document.getElementById('task-description').value.trim();
+        const priority = document.getElementById('task-priority').value;
+        const dueDate = document.getElementById('task-due-date').value;
+        const estimatedTime = document.getElementById('task-time-estimate').value.trim();
+        const taskId = taskIdInput.value;
+
+        const taskData = {
+            title, description, priority, dueDate, estimatedTime,
+            ...(taskId ? { isCompleted: appState.tasks.find(t => t.id === taskId)?.isCompleted || false } : {})
+        };
+
+        try {
+            if (taskId) {
+                // UPDATE TASK (PUT)
+                await apiFetch(`/${taskId}`, 'PUT', taskData);
+                showAIFeedback(`Task "${title}" updated.`, false);
+            } else {
+                // CREATE NEW TASK (POST)
+                await apiFetch('', 'POST', taskData);
+                showAIFeedback(`Task "${title}" added.`, false);
+            }
+            
+            taskForm.reset();
+            taskIdInput.value = '';
+            submitButton.textContent = 'Add Task';
+            fetchTasks();
+
+        } catch (error) {
+            console.error('Task submission failed:', error);
+            showAIFeedback(`Operation failed: ${error.message.substring(0, 50)}...`, true);
+        } finally {
+            submitButton.disabled = false;
+        }
+    }   
+
+    function deleteTask(taskId) {
+        const taskElement = document.querySelector(`[data-id="${taskId}"]`);       
+        if (taskElement) {
+            taskElement.classList.add('task-exit');
+        }       
+        setTimeout(() => {
+            const task = appState.tasks.find(t => t.id === taskId);
+            if (task) {
+                document.getElementById('confirm-message').textContent = `Are you sure you want to delete the task: "${task.title}"?`;               
+                confirmDeleteButton.textContent = 'Delete';
+                confirmDeleteButton.onclick = () => {
+                    finalDeleteTask(taskId);
+                    hideConfirmationModal();
+                };               
+                showConfirmationModal(taskId);
+            }
+        }, 300);
+    }
+    
+    async function finalDeleteTask(taskId) {
+        try {
+            const task = appState.tasks.find(t => t.id === taskId);
+            await apiFetch(`/${taskId}`, 'DELETE');
+            appState.tasks = appState.tasks.filter(t => t.id !== taskId);
+            renderTaskList();
+            showAIFeedback(`Task "${task.title}" deleted successfully.`, false);
+        } catch (error) {
+            console.error('Deletion failed:', error);
+            showAIFeedback(`Deletion failed: ${error.message.substring(0, 50)}...`, true);
+        }
+    }
+
+    function editTask(taskId) {
+        const task = appState.tasks.find(t => t.id === taskId);
+        if (task) {
+            document.getElementById('task-title').value = task.title;
+            document.getElementById('task-description').value = task.description;
+            document.getElementById('task-priority').value = task.priority;
+            document.getElementById('task-due-date').value = task.dueDate;
+            document.getElementById('task-time-estimate').value = task.estimatedTime || '';
+            taskIdInput.value = task.id;
+            submitButton.textContent = 'Save Changes';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    }
+
+    // TOGGLE COMPLETION (UPDATED WITH API CALL)
+    async function toggleTaskCompleted(taskId) {
+        const task = appState.tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        const newStatus = !task.isCompleted;
+        
+        try {
+            const updatedTask = await apiFetch(`/${taskId}`, 'PUT', { isCompleted: newStatus });
+            
+            task.isCompleted = updatedTask.isCompleted;
+            renderTaskList();
+        } catch (error) {
+            console.error('Toggle completion failed:', error);
+            showAIFeedback(`Update failed: ${error.message.substring(0, 50)}...`, true);
+        }
+    }   
+
+    async function clearCompletedTasks() {
+        const completedTasks = appState.tasks.filter(t => t.isCompleted);
+        const completedCount = completedTasks.length;
+        if (completedCount === 0) return;       
+        
+        const message = document.getElementById('confirm-message');
+        message.textContent = `Are you sure you want to permanently clear ${completedCount} completed task(s)?`;       
+        
+        confirmDeleteButton.textContent = 'Clear All';
+        confirmDeleteButton.onclick = async () => {
+            confirmDeleteButton.disabled = true;
+            confirmDeleteButton.textContent = 'Clearing...';
+
+            document.querySelectorAll('.completed-task').forEach(el => {
+                el.classList.add('task-exit');
+            });
+            
+            setTimeout(async () => {
+                try {
+                    const deletePromises = completedTasks.map(task => apiFetch(`/${task.id}`, 'DELETE'));
+                    await Promise.all(deletePromises);
+                    
+                    showAIFeedback(`${completedCount} tasks cleared successfully!`, false);
+                    fetchTasks();
+                    
+                } catch (error) {
+                    console.error('Clear all failed:', error);
+                    showAIFeedback(`Clear all failed: ${error.message.substring(0, 50)}...`, true);
+                } finally {
+                    confirmDeleteButton.disabled = false;
+                    hideConfirmationModal();
+                }
+            }, 300);
+        };       
+
+        confirmationModal.classList.remove('hidden');        
+        cancelDeleteButton.onclick = hideConfirmationModal;
+    }
+
+    taskForm.addEventListener('submit', handleTaskSubmit);
+    filterStatus.addEventListener('change', (e) => {
+        appState.currentFilter = e.target.value;
+        renderTaskList();
+    });
+    sortBy.addEventListener('change', (e) => {
+        appState.currentSort = e.target.value;
+        renderTaskList();
+    }); 
+    clearCompletedButton.onclick = clearCompletedTasks;
+    
+    // --- Rendering Functions ---
+    function getTaskGroup(task) {
+        if (task.isCompleted) return 'Completed';
+        if (!task.dueDate) return 'No Due Date';
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const thisWeek = new Date(today);
+        thisWeek.setDate(thisWeek.getDate() + 7);
+        const dueDate = new Date(task.dueDate + 'T00:00:00'); 
+        if (dueDate < today) return 'Overdue';
+        if (dueDate < tomorrow) return 'Due Today';
+        if (dueDate < thisWeek) return 'Due This Week';       
+        return 'Later';
+    }
+
+    function renderTaskList() {
+        let displayedTasks = [...appState.tasks];
+        displayedTasks = filterTasks(displayedTasks, appState.currentFilter);       
+        
+        if (appState.currentSort !== 'grouping') {
+            displayedTasks = sortTasks(displayedTasks, appState.currentSort);
+        }
+
+        const groupedTasks = {
+            'Overdue': [], 'Due Today': [], 'Due This Week': [], 
+            'Later': [], 'No Due Date': [], 'Completed': []
+        };
+        
+        displayedTasks.forEach(task => {
+            const group = getTaskGroup(task);
+            if (groupedTasks[group]) {
+                groupedTasks[group].push(task);
+            }
+        });
+
+        if (appState.currentSort === 'grouping') {
+             for (const group in groupedTasks) {
+                groupedTasks[group] = sortTasks(groupedTasks[group], 'priority');
+             }
+        }
+
+        taskList.innerHTML = '';
+        const groupOrder = ['Overdue', 'Due Today', 'Due This Week', 'Later', 'No Due Date', 'Completed'];
+        let taskCount = 0;
+
+        groupOrder.forEach((groupName, index) => {
+            const tasks = groupedTasks[groupName];
+            if (tasks.length > 0) {
+                taskCount += tasks.length;
+                const groupId = groupName.replace(/\s/g, '-').toLowerCase();
+
+                const headerElement = document.createElement('div');
+                headerElement.className = `cursor-pointer p-3 rounded-lg flex justify-between items-center font-bold text-lg transition duration-200 
+                                           ${groupName === 'Overdue' ? 'bg-red-200 text-red-800 hover:bg-red-300' : 
+                                             groupName === 'Due Today' ? 'bg-yellow-200 text-yellow-800 hover:bg-yellow-300' : 
+                                             groupName === 'Completed' ? 'bg-green-200 text-green-800 hover:bg-green-300' : 
+                                             'bg-gray-200 text-gray-800 hover:bg-gray-300'}`;
+                headerElement.setAttribute('onclick', `toggleGroup('${groupId}')`);
+                headerElement.innerHTML = `
+                    <span class="flex items-center space-x-2">
+                        <span>${groupName} (${tasks.length})</span>
+                    </span>
+                    <svg id="group-icon-${groupId}" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 rotate-90 transform transition-transform duration-300" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                    </svg>
+                `;
+                taskList.appendChild(headerElement);
+
+                const contentElement = document.createElement('div');
+                contentElement.id = 'group-content-' + groupId;
+                contentElement.className = 'collapsible-content space-y-3 pt-3';             
+                
+                tasks.forEach(task => {
+                    const taskEl = renderTaskItem(task);
+                    taskEl.classList.add('task-enter'); 
+                    contentElement.appendChild(taskEl);
+                });
+                taskList.appendChild(contentElement);
+            }
+        });
+        
+        if (taskCount === 0) {
+            taskList.innerHTML = '<p class="text-center text-gray-500 p-8 bg-white rounded-xl shadow-lg">No tasks match the current criteria.</p>';
+        }
+
+        updateStats();
+        updateChart();
+        overdueAlert.classList.add('hidden');
+        
+        const completedCount = appState.tasks.filter(t => t.isCompleted).length;
+        clearCompletedButton.textContent = `Clear Completed (${completedCount})`;
+        clearCompletedButton.disabled = completedCount === 0;
+        clearCompletedButton.classList.toggle('opacity-50', completedCount === 0);
+    }
+
+    function renderTaskItem(task) {
+        const priorityClass = getPriorityBadgeClass(task.priority);
+        const completedClass = task.isCompleted ? 'completed-task' : 'bg-white hover:shadow-lg';
+        const dateString = task.dueDate ? formatDate(task.dueDate) : 'No Due Date';      
+        const calendarUrl = task.dueDate ? getGoogleCalendarUrl(task) : null;
+        const taskElement = document.createElement('div');
+        taskElement.className = `p-4 border-l-4 border-transparent rounded-xl shadow-md flex flex-col sm:flex-row justify-between items-start sm:items-center transition duration-200 ${completedClass}`;
+        taskElement.setAttribute('data-id', task.id);       
+        const overdue = isOverdue(task) && !task.isCompleted;
+        taskElement.innerHTML = `
+            <!-- Task Info -->
+            <div class="flex-1 min-w-0 mb-3 sm:mb-0 mr-4">
+                <div class="flex items-center space-x-2">
+                    <input type="checkbox" ${task.isCompleted ? 'checked' : ''} onchange="toggleTaskCompleted('${task.id}')"
+                           class="h-5 w-5 text-cyan-600 border-gray-300 rounded focus:ring-cyan-500">
+                    <h3 class="text-lg font-semibold truncate ${task.isCompleted ? 'text-gray-500' : 'text-gray-800'}">${task.title}</h3>
+                </div>
+                <p class="text-sm text-gray-500 mt-1">${task.description || 'No description provided.'}</p>              
+                <div class="flex flex-wrap items-center mt-3 text-xs font-medium space-x-3">
+                    <!-- Priority Badge -->
+                    <span class="px-2 py-0.5 rounded-full ${priorityClass} shadow-sm">
+                        ${task.priority} Priority
+                    </span>                  
+                    <!-- Due Date / Overdue Status -->
+                    <span class="${overdue ? 'text-red-600 font-bold' : 'text-cyan-600'} flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                        ${dateString} ${overdue ? '(OVERDUE)' : ''}
+                    </span>                    
+                    <!-- Time Estimate -->
+                    ${task.estimatedTime ? `
+                    <span class="text-gray-600 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Est: ${task.estimatedTime}
+                    </span>` : ''}
+                </div>
+            </div>
+            <!-- Task Actions -->
+            <div class="flex space-x-2 mt-2 sm:mt-0">
+                ${calendarUrl ? `
+                <a href="${calendarUrl}" target="_blank" title="Add to Google Calendar"
+                    class="bg-green-500 hover:bg-green-600 text-white p-2 rounded-lg transition duration-200 shadow-md text-sm transform hover:scale-110">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                </a>
+                ` : ''}
+                <button onclick="editTask('${task.id}')" title="Edit Task"
+                        class="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg transition duration-200 shadow-md text-sm transform hover:scale-110">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                </button>
+                <button onclick="deleteTask('${task.id}')" title="Delete Task"
+                        class="bg-red-500 hover:bg-red-600 text-white p-2 rounded-lg transition duration-200 shadow-md text-sm transform hover:scale-110">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+            </div>
+        `;
+        return taskElement;
+    }
+    
+    function sortTasks(tasks, sortBy) {
+        if (sortBy === 'priority') {
+            const priorityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
+            tasks.sort((a, b) => {
+                if (a.isCompleted !== b.isCompleted) {
+                    return a.isCompleted ? 1 : -1;
+                }
+                return priorityOrder[b.priority] - priorityOrder[a.priority];
+            });
+        } else if (sortBy === 'dueDate') {
+            tasks.sort((a, b) => {
+                if (a.isCompleted !== b.isCompleted) {
+                    return a.isCompleted ? 1 : -1;
+                }
+                const dateA = a.dueDate ? new Date(a.dueDate + 'T00:00:00').getTime() : Infinity;
+                const dateB = b.dueDate ? new Date(b.dueDate + 'T00:00:00').getTime() : Infinity;
+                return dateA - dateB;
+            });
+        } else if (sortBy === 'createdDate') {
+            tasks.sort((a, b) => {
+                if (a.isCompleted !== b.isCompleted) {
+                    return a.isCompleted ? 1 : -1;
+                }
+                return new Date(b.createdDate) - new Date(a.createdDate);
+            });
+        }
+        return tasks;
+    }
+
+    function filterTasks(tasks, filter) {
+        if (filter === 'All') return tasks;
+        return tasks.filter(t => filter === 'Completed' ? t.isCompleted : !t.isCompleted);
+    }    
+
+    function updateStats() {
+        const total = appState.tasks.length;
+        const completed = appState.tasks.filter(t => t.isCompleted).length;
+        const rate = total > 0 ? ((completed / total) * 100).toFixed(0) : 0;     
+        totalTasksEl.textContent = total;
+        completedTasksEl.textContent = completed;
+        completionRateEl.textContent = `${rate}%`;
+    }
+
+    function isOverdue(task) {
+        if (task.isCompleted || !task.dueDate) return false;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const dueDate = new Date(task.dueDate + 'T00:00:00');
+        return dueDate < today;
+    }
+
+    function updateChart() {
+        const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const totalTasks = appState.tasks.length;
+        const completedData = labels.map(() => Math.floor(Math.random() * Math.min(10, totalTasks)));
+        const pendingData = labels.map((_, i) => Math.floor(Math.random() * Math.min(10, totalTasks) + 1));
+        
+        if (progressChart) {
+            progressChart.destroy();
+        }
+        const ctx = document.getElementById('task-progress-chart').getContext('2d');
+        progressChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Completed',
+                        data: completedData,
+                        backgroundColor: '#06b6d4',
+                        borderRadius: 4
+                    },
+                    {
+                        label: 'Pending',
+                        data: pendingData,
+                        backgroundColor: '#f59e0b',
+                        borderRadius: 4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { stacked: true, grid: { display: false } },
+                    y: { stacked: true, beginAtZero: true, grid: { color: '#e5e7eb' } }
+                },
+                plugins: {
+                    legend: { 
+                        position: 'top', 
+                        labels: { usePointStyle: true, boxWidth: 6 }
+                    },
+                    title: { display: false }
+                }
+            }
+        });
+    }
+    
+    function renderApp(fetchData = false) {
+        if (appState.userId) { 
+            usernameDisplay.textContent = `User: ${appState.username} (Mock)`;
+            authButton.textContent = 'Logout';
+            mainContent.style.display = 'grid';
+            authModal.classList.add('hidden');
+            if (fetchData || appState.tasks.length === 0) {
+                fetchTasks();
+            } else {
+                renderTaskList();
+            }
+        } else {
+            usernameDisplay.textContent = 'Guest';
+            authButton.textContent = 'Login/Register';
+            mainContent.style.display = 'none';
+            taskList.innerHTML = '<p class="text-center text-gray-500 p-8 bg-white rounded-xl shadow-lg">Please log in to manage your tasks.</p>';
+        }
+    }
+
+    window.onload = () => {
+        if (appState.userId) {
+             renderApp(true);
+        } else {
+             authModal.classList.remove('hidden');
+             renderApp(false);
+        }
+    };
+
+    // Expose utility functions globally
+    window.toggleTaskCompleted = toggleTaskCompleted;
+    window.deleteTask = deleteTask;
+    window.editTask = editTask;
+    window.isOverdue = isOverdue;
+    window.clearCompletedTasks = clearCompletedTasks;
+    window.autoPrioritizeTask = autoPrioritizeTask;
+    window.getGoogleCalendarUrl = getGoogleCalendarUrl;
+</script>
+</body>
+</html>
